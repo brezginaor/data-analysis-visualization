@@ -218,3 +218,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# SOC datasets
+data/
+
+# Local Poetry configuration
+poetry.toml
