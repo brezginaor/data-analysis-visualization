@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Data analysis and visualization using Python and Taipy"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-dependencies = ["pandas (>=3.1.1,<4.0.0)", "pyarrow (>=26.0.1,<27.0.0)"]
+dependencies = ["pandas (>=2.2,<3)", "pyarrow (>=26.0.1,<27.0.0)", "taipy-gui (>=4.1,<4.2)", "plotly (>=6,<7)", "flask (>=3.1.0,<3.1.3)"]
 
 [tool.poetry]
 package-mode = false
