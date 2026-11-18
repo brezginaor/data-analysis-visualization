@@ -1,0 +1,67 @@
+/* Один спокойный фон страницы и белые карточки с тонкой рамкой — без резкого перехода. */
+:root {
+  --plane: #f6f6f3;
+  --surface: #ffffff;
+  --border: rgba(11, 11, 11, 0.08);
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --alert: #d03b3b;
+}
+
+body, main, .taipy-gui, #root {
+  background: var(--plane) !important;
+}
+
+.shell {
+  max-width: 1680px;
+  margin: 0 auto;
+  padding: 18px 24px 28px;
+  box-sizing: border-box;
+}
+.shell p { margin: 0; }
+
+.header, .header > *, .filters, .filters > * { background: transparent !important; box-shadow: none !important; }
+.header { margin-bottom: 12px; }
+.title { display: block; font-size: 20px; font-weight: 650; color: var(--ink); }
+.caption { display: block; margin-top: 4px; font-size: 13px; color: var(--muted); }
+.filters { align-items: center; margin-bottom: 16px; padding-top: 8px; }
+.filters .MuiFormControl-root { margin: 0 !important; width: 100%; }
+.filters > div:last-child { justify-self: start; }
+.reset { white-space: nowrap; }
+
+.kpis { margin-bottom: 16px; }
+.kpi {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  min-height: 92px;
+  box-sizing: border-box;
+}
+.kpi-alert { box-shadow: inset 3px 0 0 var(--alert); }
+.kpi-label { display: block; font-size: 12px; color: var(--muted); }
+.kpi-value { display: block; margin-top: 6px; font-size: 26px; font-weight: 650; line-height: 1.15; color: var(--ink); }
+.kpi-note { display: block; margin-top: 6px; font-size: 12px; color: var(--ink-2); }
+
+.row { margin-bottom: 16px; }
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: none !important;
+  padding: 14px 16px 6px;
+  min-width: 0;
+}
+.kpi { box-shadow: none; }
+.kpi.kpi-alert { box-shadow: inset 3px 0 0 var(--alert); }
+.card-title { display: block; font-size: 15px; font-weight: 650; color: var(--ink); }
+.card-hint { display: block; margin-top: 2px; font-size: 12px; color: var(--muted); }
+
+@media (max-width: 1100px) {
+  .row > div { grid-template-columns: 1fr !important; }
+  .kpis > div, .kpis { grid-template-columns: repeat(3, 1fr) !important; }
+}
+
+/* Плитка, где значение — название, а не число: шрифт мельче, чтобы влезло в одну-две строки. */
+.kpi-text .kpi-value { font-size: 18px; line-height: 1.25; }
