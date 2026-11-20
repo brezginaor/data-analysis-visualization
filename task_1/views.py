@@ -64,11 +64,17 @@ def compute(data: Dataset, f: Filters) -> dict:
     table = metrics.top_rules(cards)
     rules = metrics.rules_kpis(cards)
     out["fig_rules"] = charts.rules(table)
+
     if rules["top_n"]:
-        note = (f"{rules['quiet_rules']} из {rules['top_n']} почти без инцидентов: "
-                f"{ru_pct(rules['quiet_share'])} потока" if rules["quiet_rules"] else
-                "у каждого есть реальные инциденты")
-        out.update(tile("t_rules", ru_pct(rules["top_share"]), note, alert=rules["quiet_share"] >= 0.05))
+        note = (
+            f"{rules['quiet_rules']} из {rules['top_n']}: менее 1 % "
+            f"с вердиктом «Решён»; "
+            f"{ru_pct(rules['quiet_share'])} потока"
+            if rules["quiet_rules"] else
+            "У каждого правила не менее 1 % карточек с вердиктом «Решён»"
+        )
+        out.update(tile("t_rules", ru_pct(rules["top_share"]), note,
+                        alert=rules["quiet_share"] >= 0.05))
     else:
         out.update(tile("t_rules", DASH, "нет карточек"))
 
