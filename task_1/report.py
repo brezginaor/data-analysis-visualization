@@ -72,9 +72,18 @@ def section_rules(data, s) -> list[str]:
     ]
     if len(quiet):
         lines.append(
-            f"- **{len(quiet)}** из 10 правил почти не дают реальных инцидентов (меньше 1 % карточек) и создают "
-            f"**{ru_pct(rules['quiet_share'])}** потока — первые кандидаты на донастройку, белые списки или автозакрытие: "
-            + ", ".join(f"`{name}` ({ru_pct(row[REAL] / row['total'])} реальных)" for name, row in quiet.iterrows()) + "."
+            f"- У **{len(quiet)}** из 10 правил доля карточек "
+            f"с вердиктом «Решён» составляет менее 1 %. "
+            f"На эти правила приходится "
+            f"**{ru_pct(rules['quiet_share'])}** потока: "
+            + ", ".join(
+                f"`{name}` "
+                f"({ru_pct(row[REAL] / row['total'])} — решён, "
+                f"{ru_pct(row[NO_VERDICT] / row['total'])} — без вердикта)"
+                for name, row in quiet.iterrows()
+            ) + ". Низкая доля подтверждённых инцидентов "
+            "может быть связана с неполнотой разметки. "
+            "Эти правила требуют дополнительного анализа."
         )
     else:
         lines.append("- У каждого правила топа есть реальные инциденты (не меньше 1 % карточек): "
@@ -101,16 +110,23 @@ def section_reaction(data, s) -> list[str]:
         if crit > rest:
             verdict = (f"**Нет.** Медиана времени до взятия в работу у критических карточек — **{ru_duration(crit)}**, "
                        f"у остальных — {ru_duration(rest)}: критические ждут в {times(crit, rest)} дольше. "
-                       "Приоритет в очереди сейчас не ускоряет реакцию.")
+                       "По карточкам с корректными временными данными "
+                        "наблюдается более длительное ожидание "
+                        "у критических карточек.")
         else:
             verdict = (f"**Да.** Медиана у критических карточек — **{ru_duration(crit)}**, "
                        f"у остальных — {ru_duration(rest)}.")
         lines.append(f"- {verdict}")
     lines.append("- Медианы по уровням: " + "; ".join(
         f"{level.lower()} — {ru_duration(value)}" for level, value in medians.items()) + ".")
-    lines.append(f"- У {ru_int(react['missing'])} карточек ({ru_pct(react['missing_share'])}) нет даты взятия в работу "
-                 "или интервал ошибочный: их закрыли, не взяв в работу, и в кривые они не входят. "
-                 f"Кривые построены по {ru_int(react['known'])} карточкам.")
+    lines.append(
+        f"- У {ru_int(react['missing'])} карточек "
+        f"({ru_pct(react['missing_share'])}) отсутствует дата "
+        "взятия в работу или временной интервал некорректен. "
+        "Определить время реакции для таких карточек невозможно, "
+        "поэтому они исключены из расчёта. "
+        f"Кривые построены по {ru_int(react['known'])} карточкам."
+    )
     return [*lines, ""]
 
 

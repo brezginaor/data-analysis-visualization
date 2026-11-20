@@ -113,7 +113,7 @@ def reaction_kpis(cards: pd.DataFrame) -> dict:
     rest = cards.loc[cards["severity"] != "Критическая", "react_sec"].dropna()
     return {
         "known": len(react),
-        # Без даты взятия (или с ошибочным интервалом): карточку закрыли, не взяв в работу.
+        # Карточки без даты взятия в работу или с некорректным интервалом.
         "missing": len(cards) - len(react),
         "missing_share": (len(cards) - len(react)) / len(cards) if len(cards) else np.nan,
         "median_all": float(react.median()) if len(react) else np.nan,
