@@ -10,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from loader import ENRICHMENT, Filters, THRESHOLD, apply_filters
+from loader import ENRICHMENT, OUTCOMES, Filters, THRESHOLD, apply_filters
 
 TOP_FEATURES = 10       # сколько признаков показываем на уровне потока
 TOP_CONTRIBS = 8        # сколько вкладов в водопаде карточки
@@ -129,6 +129,10 @@ def doubtful_case(flow: pd.DataFrame, features: tuple[str, ...]) -> pd.Series | 
 
 
 def filtered_cards(data, f: Filters) -> pd.DataFrame:
-    """Карточки выбранной команды для селектора (без фильтра по исходу)."""
+    """Карточки выбранной команды и исходов для селектора."""
     cards = data.cards
-    return cards if f.team is None else cards.loc[cards["team"] == f.team]
+    if f.team is not None:
+        cards = cards.loc[cards["team"] == f.team]
+    if f.outcomes and set(f.outcomes) != set(OUTCOMES):
+        cards = cards.loc[cards["outcome"].isin(f.outcomes)]
+    return cards

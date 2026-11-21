@@ -219,8 +219,17 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# SOC datasets
-data/
+# SOC datasets: по умолчанию игнорировать всё, кроме двух CSV для задания 3
+# Проверяющий получает эти два файла вместе с репозиторием.
+data/*
+!data/task3/
+data/task3/*
+!data/task3/cards_practice.csv
+!data/task3/shap_cards.csv
 
 # Local Poetry configuration
 poetry.toml
+
+# Распакованный учебный комплект задания 3 (не хранить в репозитории)
+IAVD_3.7_ML_team/
+task_3/course_pack/

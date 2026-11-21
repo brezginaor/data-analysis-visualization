@@ -13,25 +13,26 @@ from pathlib import Path
 import numpy as np
 
 import loader
-from loader import ENRICHMENT, SUPER, THRESHOLD, Filters, ru_int, ru_num, ru_pct, ru_proba
+from loader import ENRICHMENT, PROJECT_TEAM, SUPER, THRESHOLD, Filters, ru_int, ru_num, ru_pct, ru_proba
 
 
 def sci(value: float) -> str:
+    if value == 0:
+        return "0"
     exp = int(np.floor(np.log10(value)))
     return f"{ru_num(value / 10 ** exp, 0)}·10{str(exp).translate(SUPER)}"
 
 from views import summary
 
 HERE = Path(__file__).resolve().parent
-EXAMPLE_CONFIRMED = 523983  # TP, который модель подняла бы и без обогащения
-EXAMPLE_DOUBTFUL = 527002   # FP у порога, который без обогащения падает ниже порога
-
-
 def build(cards: Path | None, shap: Path | None) -> str:
-    data = loader.load(cards, shap)
-    s = summary(data, Filters(), EXAMPLE_DOUBTFUL)
+    data = loader.load(cards, shap)  # loader оставляет только группу PROJECT_TEAM
+    initial_id = int(data.cards["EntityId"].iloc[0])
+    s = summary(data, Filters(), initial_id)
+    # Сомнительный пример выбираем только внутри своей группы, если он найден.
     if s["doubtful"] is not None:
-        s = summary(data, Filters(), int(s["doubtful"]["EntityId"]))  # водопад — по сомнительному случаю
+        initial_id = int(s["doubtful"]["EntityId"])
+        s = summary(data, Filters(), initial_id)
     top, signed, doubt = s["top"], s["signed"], s["doubt"]
     confirmed, doubtful = s["confirmed"], s["doubtful"]
     card = s["card"]
@@ -59,7 +60,7 @@ def build(cards: Path | None, shap: Path | None) -> str:
         f"данные самой карточки (главный толчок «к инциденту» — "
         f"«{max(((f, confirmed[f]) for f in data.features), key=lambda x: x[1])[0]}» "
         f"с вкладом +{ru_num(max(confirmed[f] for f in data.features))} лог. шанса). "
-        "Это объяснение подтверждается исходом: карточка действительно решена как инцидент."
+        "Классификация согласуется с меткой TP; для проверки смысла вкладов нужен контекст событий карточки."
         if confirmed is not None else "Подтверждённый случай не найден в выборке."
     )
     if doubtful is not None:
@@ -77,7 +78,7 @@ def build(cards: Path | None, shap: Path | None) -> str:
         )
     else:
         doubtful_line = "Сомнительный случай в выборке не найден."
-    cf = card  # водопад сомнительной карточки — тот же 527002
+    cf = card  # водопад карточки команды 4 (сомнительной, если такая найдена)
     card_lines = [
         f"- Базовая линия (средний логарифм шансов по обучению): {ru_num(cf['waterfall'].iloc[0]['value'])}.",
         *[f"- «{r.feature}»: {r.value:+.2f}".replace('.', ',') + " лог. шанса"
@@ -91,8 +92,8 @@ def build(cards: Path | None, shap: Path | None) -> str:
         "# Почему модель решила так: SHAP-объяснение для SOC (задание 3)",
         "",
         f"Модель курса `lgbm_gate1__v001`, рабочий порог {ru_num(THRESHOLD, 4)}: оценка не ниже порога — карточка идёт в приоритет. "
-        f"Разложение TreeSHAP: вклады 73 признаков в логарифме шансов для {ru_int(len(data.shap))} карточек "
-        "сентября 2025 (40 команд × 8 карточек: по 2 исхода TP/FP/FN/TN). Собран `report.py` "
+        f"Разложение TreeSHAP: вклады {len(data.features)} признаков в логарифме шансов для "
+        f"{ru_int(len(data.shap))} карточек команды SHAP № {PROJECT_TEAM} (сентябрь 2025). Собран `report.py` "
         f"{date.today():%d.%m.%Y}.",
         "",
         "Уровни показа выбраны так: **одна карточка** — водопад решения; **поток** — средние вклады и их знак "
@@ -101,32 +102,32 @@ def build(cards: Path | None, shap: Path | None) -> str:
         "",
         "## Коротко для SOC",
         "",
-        f"- **Объяснению можно верить арифметически:** sigmoid(база + 73 вклада) воспроизводит оценку модели "
+        f"- **Объяснение арифметически согласовано:** sigmoid(база + {len(data.features)} вкладов) воспроизводит оценку модели "
         f"с точностью {sci(data.check)} — это округление вероятности в файле. Вклады сходятся с решением.",
-        f"- **Модель держится на адресах и частотах:** топ опоры — «Hostname атакующего», «Hostname Цели», "
-        f"`src_is_private`, `freq_Наименование` (см. раздел 3).",
+        f"- **Крупнейшие средние вклады в группе:** "
+        + ", ".join(f"«{name}»" for name in top["feature"].head(4)) + " (см. раздел 3).",
         f"- **Объяснение подтверждается данными:** {confirmed_line if confirmed is not None else ''}",
         f"- **Объяснение выглядит сомнительно:** {doubtful_line}",
-        f"- **Сомнение носит системный характер:** без вкладов обогащения упали бы ниже порога "
+        f"- **На выбранных карточках группы:** при исключении вкладов обогащения из суммы условная оценка оказалась бы ниже порога "
         f"{ru_int(doubt['on_enrichment'])} из {ru_int(doubt['raised'])} поднятых карточек "
         f"({ru_pct(doubt['share'], 0)}), в том числе {ru_int(doubt['fp_near'])} ложных тревог из "
         f"{ru_int(doubt['fp_near_total'])} поднятых.",
         "",
         "## 1. Уровень карточки: почему модель решила так?",
         "",
-        f"*Водопад: базовая линия → крупнейшие вклады → итог; proba = sigmoid(итог). Пример — сомнительная "
-        f"карточка {int(s['doubtful']['EntityId']) if s['doubtful'] is not None else EXAMPLE_DOUBTFUL}.*",
+        f"*Водопад: базовая линия → крупнейшие вклады → итог; proba = sigmoid(итог). "
+        f"Пример — карточка {initial_id} команды {PROJECT_TEAM}.*",
         "",
         *card_lines,
         "",
-        "Вклады по модулю не складываются «в пользу» решения: «src_is_private» толкает к инциденту, "
-        "а «Hostname атакующего» здесь — против. Решение — баланс 73 вкладов, а не один флаг.",
+        "Решение складывается из всех вкладов, включая положительные, отрицательные и «остальные». "
+        "SHAP описывает поведение модели, а не причину события.",
         "",
         "## 2. Можно ли объяснению верить? Проверяемость",
         "",
         "*Проверка воспроизводимости: оценка модели из одних вкладов.*",
         "",
-        f"- Из base и 73 вкладов восстановлена оценка каждой карточки: максимальное расхождение с proba из "
+        f"- Из base и {len(data.features)} вкладов восстановлена оценка каждой карточки: максимальное расхождение с proba из "
         f"файла — {sci(data.check)}, то есть ровно округление вероятности до 6 знаков.",
         "- Значит, показанные вклады действительно те, по которым модель приняла решение, а не пересчёт "
         "постфактум другой моделью.",
@@ -143,10 +144,9 @@ def build(cards: Path | None, shap: Path | None) -> str:
         "",
         *outcome_lines,
         "",
-        "Главный вывод для SOC: признаки вроде «Hostname атакующего» сильно работают у найденных инцидентов "
-        "(TP +1,75), почти ничего не дают у пропущенных (FN +0,01) и умеренно у ложных тревог (FP +1,05). "
-        "Модель опирается на то, кто и куда стучался, — когда адресного сигнала нет, она теряет опору "
-        "и откладывает карточку: именно так выглядят её пропуски.",
+        "Средние подписанные вклады различаются по исходам. Среднее около нуля не означает, "
+        "что признак не используется: положительные и отрицательные вклады могут взаимно компенсироваться. "
+        "Выводы относятся только к выбранным карточкам команды 4.",
         "",
         "## 5. Сомнительные объяснения: деградировавшее обогащение",
         "",

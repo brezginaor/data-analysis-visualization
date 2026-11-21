@@ -6,6 +6,8 @@
 
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -62,6 +64,38 @@ class DataLoaderChecks(unittest.TestCase):
         self.assertEqual(len(by_team), 4)
         by_outcome = loader.apply_filters(frame, Filters(outcomes=("TP",)))
         self.assertEqual(set(by_outcome["outcome"]), {"TP"})
+
+    def test_missing_repo_csv_has_useful_error(self):
+        with TemporaryDirectory() as tmp:
+            with patch.object(loader, "CARDS_FILE", Path(tmp) / "cards_practice.csv"):
+                with self.assertRaisesRegex(FileNotFoundError, "data/task3"):
+                    loader.resolve_data_files()
+
+    def test_repo_data_path_and_only_team_four(self):
+        """Стандартные CSV из data/task3: отбирается только команда 4."""
+        frame_2 = shap_frame()
+        frame_4 = frame_2.copy()
+        frame_4["EntityId"] += 100
+        frame_4["team"] = loader.PROJECT_TEAM
+        combined = pd.concat([frame_2, frame_4], ignore_index=True)
+        with TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "data" / "task3"
+            folder.mkdir(parents=True)
+            combined[["EntityId", "team", "created", "y_true", "proba", "outcome", "flag"]].to_csv(
+                folder / "cards_practice.csv", sep=";", index=False)
+            combined[["EntityId", "y_true", "proba", "outcome", "base", *FEATURES]].to_csv(
+                folder / "shap_cards.csv", sep=";", index=False)
+            with patch.object(loader, "CARDS_FILE", folder / "cards_practice.csv"), \
+                 patch.object(loader, "SHAP_FILE", folder / "shap_cards.csv"):
+                data = loader.load()
+            self.assertEqual(data.path.parent, folder)
+            self.assertEqual(len(data.cards), 4)
+            self.assertEqual(len(data.shap), 4)
+            self.assertEqual(set(data.cards["team"]), {loader.PROJECT_TEAM})
+            self.assertEqual(set(data.shap["team"]), {loader.PROJECT_TEAM})
+            labels = views.card_labels(data, loader.Filters(outcomes=("FP",)))
+            self.assertEqual(len(labels), 1)
+            self.assertTrue(labels[0].startswith("102 "))
 
 
 class MetricsChecks(unittest.TestCase):

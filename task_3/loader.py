@@ -1,6 +1,7 @@
 """Загрузка данных задания 3: карточки команд и предрассчитанные SHAP-вклады модели курса.
 
-Файлы лежат в data/task3/ (в Git не попадают), источник — архив IAVD_3.7_ML_team:
+CSV хранятся в репозитории в data/task3/; распаковка полного учебного комплекта не требуется.
+Для проекта анализируется только команда № 4 (8 карточек из 320), остальная выборка не смешивается.
     cards_practice.csv — 320 карточек (40 команд × 8: по 2 исхода TP/FP/FN/TN);
     shap_cards.csv     — вклады 73 признаков (логарифм шансов) + base + proba.
 
@@ -19,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data" / "task3"
 CARDS_FILE = DATA_DIR / "cards_practice.csv"
 SHAP_FILE = DATA_DIR / "shap_cards.csv"
+PROJECT_TEAM = 4
 
 THRESHOLD = 0.0193  # рабочая порог модели, часть модели — не менять (см. model_card)
 SERVICE = ("EntityId", "y_true", "proba", "outcome", "base")
@@ -120,22 +122,38 @@ def reconstruction_check(shap: pd.DataFrame, features: tuple[str, ...], base: fl
     return float((1 / (1 + np.exp(-total)) - shap["proba"]).abs().max())
 
 
-def load(cards_path: Path | None = None, shap_path: Path | None = None) -> Data:
-    cards_path = Path(cards_path or CARDS_FILE)
-    shap_path = Path(shap_path or SHAP_FILE)
-    for path in (cards_path, shap_path):
-        if not path.exists():
-            raise SystemExit(f"Не найден {path}. Распакуйте course_pack из IAVD_3.7_ML_team в data/task3/.")
+def resolve_data_files(cards_path: Path | None = None, shap_path: Path | None = None) -> tuple[Path, Path]:
+    """Возвращает два CSV из data/task3 (или из явно переданных путей)."""
+    cards = Path(cards_path) if cards_path is not None else CARDS_FILE
+    shap = Path(shap_path) if shap_path is not None else SHAP_FILE
+    for path in (cards, shap):
+        if not path.is_file():
+            raise FileNotFoundError(
+                f"Не найден {path}. Файлы cards_practice.csv и shap_cards.csv "
+                "должны лежать в data/task3/ и поставляться с репозиторием."
+            )
+    return cards, shap
+
+
+def load(cards_path: Path | None = None, shap_path: Path | None = None,
+         *, team: int = PROJECT_TEAM) -> Data:
+    cards_path, shap_path = resolve_data_files(cards_path, shap_path)
     cards = _read_cards(cards_path)
     shap_raw, base = _read_shap(shap_path, tuple())  # список признаков определим по файлу
     features = tuple(c for c in shap_raw.columns if c not in SERVICE)
     shap, base = _read_shap(shap_path, features)
-    check = reconstruction_check(shap, features, base)
-    if check > RECONSTRUCTION_TOLERANCE:
-        raise ValueError(f"Вклады не сходятся с оценкой модели: расхождение {check:.2e} > {RECONSTRUCTION_TOLERANCE:.0e}.")
     merged = shap.merge(cards[["EntityId", "team", "created", "flag"]], on="EntityId", how="inner", validate="one_to_one")
     if len(merged) != len(cards):
         raise ValueError("Наборы карточек в cards_practice и shap_cards не совпадают.")
+
+    # Отбираем группу ДО построения любых графиков, KPI и отчёта.
+    cards = cards.loc[cards["team"] == team].copy()
+    merged = merged.loc[merged["team"] == team].copy()
+    if cards.empty:
+        raise ValueError(f"В файле нет карточек команды {team}.")
+    check = reconstruction_check(merged, features, base)
+    if check > RECONSTRUCTION_TOLERANCE:
+        raise ValueError(f"Вклады не сходятся с оценкой модели: расхождение {check:.2e} > {RECONSTRUCTION_TOLERANCE:.0e}.")
     return Data(cards=cards, shap=merged, features=features, base=base, check=check, path=shap_path)
 
 

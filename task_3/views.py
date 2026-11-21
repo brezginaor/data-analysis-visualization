@@ -9,7 +9,7 @@ import numpy as np
 
 import charts
 import metrics
-from loader import ENRICHMENT, OUTCOME_LABELS, THRESHOLD, Data, Filters, apply_filters, ru_int, ru_pct, ru_proba
+from loader import ENRICHMENT, OUTCOME_LABELS, PROJECT_TEAM, THRESHOLD, Data, Filters, apply_filters, ru_int, ru_pct, ru_proba
 
 DASH = "—"
 
@@ -26,10 +26,10 @@ def tile(key: str, value: str, note: str = "", alert: bool = False) -> dict:
 
 
 def caption(data: Data, f: Filters) -> str:
-    team = "все 40 команд" if f.team is None else f"команда {f.team} из 40"
     shown = len(apply_filters(data.shap, f))
-    return (f"Модель lgbm_gate1__v001, порог {THRESHOLD} · SHAP в логарифме шансов объясняет решение модели, "
-            f"а не причину инцидента · набор: 320 карточек, сентябрь 2025 · показано: {ru_int(shown)} ({team})")
+    return (f"Команда SHAP № {PROJECT_TEAM} · модель lgbm_gate1__v001, порог {THRESHOLD} · "
+            "SHAP в логарифме шансов объясняет решение модели, а не причину инцидента · "
+            f"показано: {ru_int(shown)} из {ru_int(len(data.cards))} карточек группы")
 
 
 def card_label(row) -> str:
@@ -41,10 +41,9 @@ def compute(data: Data, f: Filters, entity_id: int | None = None) -> dict:
     out: dict = {"caption": caption(data, f)}
 
     # Уровень 1: одна карточка — водопад решения.
-    row = metrics.card_row(data.shap, entity_id) if entity_id else None
+    row = metrics.card_row(flow, entity_id) if entity_id else None
     if row is None:
-        cards = metrics.filtered_cards(data, f)
-        row = metrics.card_row(data.shap, int(cards["EntityId"].iloc[0])) if len(cards) else None
+        row = flow.iloc[0] if len(flow) else None
     if row is not None:
         wf = metrics.waterfall_values(row, data.features, data.base)
         out["fig_card"] = charts.waterfall(wf, float(row["proba"]))
