@@ -53,28 +53,74 @@ def empty(message: str = "Нет карточек для выбранных фи
 
 
 # ---------------------------------------------------------------- 1. Водопад карточки
+def feature_label(name: str) -> str:
+    """Короткие переносы только на оси; полное имя остаётся в hover."""
+    if name == "Оценка модели (лог. шансов)":
+        return "Итог (logit)"
+    if name.startswith("остальные "):
+        return name.replace(" признаков", "<br>признаков")
+    if len(name) <= 17:
+        return name
+    if " " in name:
+        first, rest = name.split(" ", 1)
+        return f"{first}<br>{rest}"
+    if "_" in name:
+        first, rest = name.split("_", 1)
+        return f"{first}_<br>{rest}"
+    return name
+
+
 def waterfall(table: pd.DataFrame, proba: float) -> go.Figure:
     if table.empty:
         return empty()
-    fig = base(go.Figure(), left=10, right=24, top=30)
+    labels = [feature_label(str(n)) for n in table["feature"]]
+    base_value = float(table.iloc[0]["value"])
+    final_value = float(table.iloc[-1]["value"])
+
+    # Все промежуточные значения учитываются в диапазоне оси. Нуль не нужен:
+    # показываем изменения logit, а не длинные полосы от нуля до базы/итога.
+    relative = table.loc[table["measure"] == "relative", "value"].astype(float)
+    levels = np.r_[base_value, base_value + relative.cumsum().to_numpy()]
+    span = max(float(levels.max() - levels.min()), 0.5)
+    padding = max(span * 0.12, 0.25)
+
+    fig = base(go.Figure(), left=180, right=54, top=49, bottom=50)
     fig.add_trace(go.Waterfall(
-        x=table["feature"], measure=table["measure"], y=table["value"],
+        orientation="h", y=labels, x=table["value"], measure=table["measure"],
         increasing=dict(marker=dict(color=TO_INCIDENT)),
         decreasing=dict(marker=dict(color=TO_LEGIT)),
-        totals=dict(marker=dict(color=INK)),
+        # Plotly использует абсолютную базу и итог для расчёта ступеней.
+        # Их собственные полосы скрываем: вместо них ниже ставим метки.
+        totals=dict(marker=dict(color="rgba(0,0,0,0)",
+                                line=dict(color="rgba(0,0,0,0)", width=0))),
         connector=dict(line=dict(color=AXIS, width=1, dash="dot")),
-        hovertemplate="%{x}: %{y:+.3f} лог. шансов<extra></extra>",
+        customdata=table["feature"],
+        hovertemplate="%{customdata}: %{x:+.3f} лог. шансов<extra></extra>",
         textposition="outside",
-        text=[f"{v:+.2f}" if m == "relative" else f"{v:.2f}" for v, m in zip(table["value"], table["measure"])],
-        textfont=dict(size=11, color=INK_2),
+        text=[f"{v:+.2f}" if m == "relative" else ""
+              for v, m in zip(table["value"], table["measure"])],
+        textfont=dict(size=10, color=INK_2),
     ))
-    outcome = "инцидент" if proba >= THRESHOLD else "отложена"
-    fig.add_annotation(x=1, xref="paper", y=1, yref="paper", xanchor="right", yanchor="bottom",
-                       text=f"sigmoid(итог) = {ru_proba(proba)} → {outcome}", showarrow=False,
+    fig.add_trace(go.Scatter(
+        x=[base_value, final_value], y=[labels[0], labels[-1]],
+        mode="markers+text", showlegend=False,
+        marker=dict(symbol="line-ns", size=23, color=INK_2,
+                    line=dict(width=3, color=INK_2)),
+        text=[ru_num(base_value), ru_num(final_value)],
+        textposition="middle right", textfont=dict(size=11, color=INK),
+        customdata=["Базовая линия", "Итог модели"],
+        hovertemplate="%{customdata}: %{x:.3f} лог. шансов<extra></extra>",
+    ))
+    outcome = "в приоритете" if proba >= THRESHOLD else "отложена"
+    fig.add_annotation(x=1, xref="paper", y=1.045, yref="paper", xanchor="right", yanchor="bottom",
+                       text=f"Вероятность: {ru_proba(proba)} · {outcome}", showarrow=False,
                        font=dict(size=12, color=INK))
-    fig.update_yaxes(title=dict(text="логарифм шансов «инцидента»", font=dict(color=MUTED)), automargin=True)
-    fig.update_xaxes(automargin=True, tickfont=dict(color=INK_2, size=11))
-    fig.update_layout(bargap=0.25)
+    fig.update_xaxes(title=dict(text="Логарифм шансов (logit)", font=dict(color=MUTED)),
+                     range=[float(levels.min()) - padding, float(levels.max()) + padding * 1.6],
+                     showgrid=True, gridcolor=GRID, automargin=True)
+    fig.update_yaxes(showgrid=False, autorange="reversed", automargin=True,
+                     tickfont=dict(color=INK_2, size=11))
+    fig.update_layout(bargap=0.20)
     return fig
 
 
@@ -108,54 +154,54 @@ OUTCOME_COLORS = {"TP": TO_INCIDENT, "FP": DOUBT, "FN": "#7c3aed", "TN": TO_LEGI
 def signed_outcomes(table: pd.DataFrame) -> go.Figure:
     if table.empty:
         return empty()
-    fig = base(go.Figure(), left=10, right=24, top=70)
+    fig = base(go.Figure(), left=56, right=20, top=56, bottom=46)
     for outcome in ("TP", "FP", "FN", "TN"):
         part = table.loc[table["outcome"] == outcome]
         if part.empty:
             continue
         fig.add_trace(go.Bar(
-            x=part["feature"], y=part["mean_shap"], name=outcome,
+            x=[feature_label(str(name)) for name in part["feature"]],
+            y=part["mean_shap"], name=outcome,
             marker=dict(color=OUTCOME_COLORS[outcome]), width=0.7,
-            customdata=[OUTCOME_NAMES[o] for o in part["outcome"]],
-            hovertemplate="%{x}<br>%{customdata}: %{y:+.2f} лог. шанса<extra></extra>",
+            customdata=[[str(name), OUTCOME_NAMES[outcome]] for name in part["feature"]],
+            hovertemplate="%{customdata[0]}<br>%{customdata[1]}: %{y:+.2f} лог. шанса<extra></extra>",
         ))
     fig.add_hline(y=0, line=dict(color=INK, width=1))
     fig.update_layout(barmode="group", bargap=0.35, bargroupgap=0.08,
                       legend=dict(orientation="h", x=0, y=1, yanchor="bottom",
                                   font=dict(size=12), itemclick=False, itemdoubleclick=False),
                       showlegend=True)
-    fig.update_yaxes(title=dict(text="средний SHAP: «+» к инциденту, «−» к легитимному",
-                                font=dict(color=MUTED)), automargin=True)
-    fig.update_xaxes(automargin=True, tickfont=dict(color=INK_2, size=11))
+    fig.update_yaxes(title=dict(text="Средний SHAP, лог. шансов", font=dict(color=MUTED)),
+                     automargin=True)
+    fig.update_xaxes(automargin=True, tickfont=dict(color=INK_2, size=10), tickangle=0)
     return fig
 
 
-# ---------------------------------------------------------------- 4. Роль «Алерта» в потоке
-def alert_scatter(flow: pd.DataFrame, alert_column: str = "Алерт") -> go.Figure:
-    if flow.empty or alert_column not in flow.columns:
-        return empty()
-    fig = base(go.Figure(), left=52, right=24, top=70, bottom=48)
-    names = {"TP": "инцидент, поднята", "FP": "не инцидент, поднята",
-             "FN": "инцидент, отложена", "TN": "не инцидент, отложена"}
-    colors = {"TP": TO_INCIDENT, "FP": DOUBT, "FN": "#7c3aed", "TN": TO_LEGIT}
-    for outcome in ("TP", "FP", "FN", "TN"):
-        part = flow.loc[flow["outcome"] == outcome]
-        if part.empty:
-            continue
-        fig.add_trace(go.Scatter(
-            x=part[alert_column].clip(lower=-0.02), y=part["proba"].clip(lower=5e-7),
-            mode="markers", name=names[outcome],
-            marker=dict(size=9, color=colors[outcome], line=dict(color=SURFACE, width=1.5), opacity=0.85),
-            customdata=part["EntityId"],
-            hovertemplate="Карточка %{customdata}<br>вклад «" + alert_column + "»: %{x:+.2f}"
-                          "<br>оценка: %{y:.4f}<extra></extra>",
-        ))
-    logit_threshold = np.log(THRESHOLD / (1 - THRESHOLD))
-    fig.add_hline(y=THRESHOLD, line=dict(color=INK, width=1, dash="dash"))
-    fig.add_annotation(x=0, xref="paper", y=THRESHOLD, text=f"порог {ru_num(THRESHOLD, 4)}",
-                       showarrow=False, xanchor="left", yanchor="bottom", font=dict(size=11, color=MUTED))
-    fig.update_layout(legend=dict(orientation="h", x=0, y=1, yanchor="bottom", font=dict(size=12),
-                                  itemclick=False, itemdoubleclick=False), showlegend=True)
-    fig.update_yaxes(type="log", title=dict(text="оценка модели (лог. шкала)", font=dict(color=MUTED)))
-    fig.update_xaxes(title=dict(text=f"вклад признака «{alert_column}», лог. шансов", font=dict(color=MUTED)))
+# ---------------------------------------------------------------- 4. Один сомнительный случай: две оценки и порог
+
+def doubt_comparison(proba: float, conditional: float, entity_id: int) -> go.Figure:
+    """Показывает арифметическое исключение SHAP-вкладов, НЕ ablation признаков."""
+    fig = base(go.Figure(), left=20, right=48, top=42, bottom=34)
+    fig.add_trace(go.Bar(
+        x=[proba, conditional], y=["Оценка модели", "Пересчёт SHAP без 3 вкладов"],
+        orientation="h", width=0.52,
+        marker=dict(color=[DOUBT, TO_LEGIT]),
+        text=[ru_pct(proba, 2), ru_pct(conditional, 2)],
+        textposition="outside", textfont=dict(size=13, color=INK),
+        cliponaxis=False,
+        customdata=["Исходный прогноз модели",
+                    "Только арифметический пересчёт вкладов; модель повторно не запускалась"],
+        hovertemplate=f"Карточка {entity_id} (FP)<br>%{{y}}: %{{x:.2%}}<br>%{{customdata}}<extra></extra>",
+    ))
+    fig.add_vline(x=THRESHOLD, line=dict(color=INK_2, width=1.5, dash="dash"))
+    fig.add_annotation(
+        x=THRESHOLD, xref="x", y=1.05, yref="paper",
+        text=f"Порог {ru_pct(THRESHOLD, 2)}", showarrow=False,
+        xanchor="center", yanchor="bottom", font=dict(color=INK_2, size=11),
+    )
+    fig.update_layout(bargap=0.5)
+    fig.update_yaxes(showgrid=False, autorange="reversed", automargin=True,
+                     tickfont=dict(color=INK_2, size=12))
+    fig.update_xaxes(range=[0, max(proba, conditional, THRESHOLD) * 1.28],
+                     tickformat=".1%", title=None, automargin=True)
     return fig

@@ -14,7 +14,7 @@ from taipy.gui import Gui
 
 import loader
 from charts import PLOT_CONFIG  # noqa: F401  (используется в разметке страницы)
-from loader import OUTCOMES, Filters
+from loader import OUTCOMES, PROJECT_TEAM, Filters
 from views import TILES, card_labels, compute, entity_of
 
 parser = argparse.ArgumentParser(description="Дашборд «Почему модель решила так» (задание 3, SHAP)")
@@ -24,38 +24,27 @@ parser.add_argument("--port", type=int, default=5014)
 args, _ = parser.parse_known_args()
 
 DATA = loader.load(args.cards, args.shap)
+print(f"Команда SHAP № {PROJECT_TEAM}: {len(DATA.cards)} карточек; данные: {DATA.path.parent}")
 
 OUTCOME_LOV = list(OUTCOMES)
-teams = sorted(DATA.cards["team"].unique().tolist())
-TEAM_LOV = ["Все команды"] + [f"Команда {t}" for t in teams]
-
-
-def team_of(label: str) -> int | None:
-    return None if label == "Все команды" else int(label.split()[-1])
-
-
-team_name = f"Команда {teams[1]}" if len(teams) > 1 else "Все команды"
 selected_outcomes = list(OUTCOME_LOV)
 outcome_summary = "Все исходы"
-cards = card_labels(DATA, Filters(team_of(team_name)))
+cards = card_labels(DATA, Filters())
 selected_card = cards[0]
-globals().update(compute(DATA, Filters(team_of(team_name)), entity_of(selected_card)))
+globals().update(compute(DATA, Filters(), entity_of(selected_card)))
 
 
 def filters_of(state) -> Filters:
     outcomes = tuple(state.selected_outcomes or ())
-    return Filters(team_of(state.team_name),
-                   () if set(outcomes) == set(OUTCOME_LOV) else outcomes)
+    return Filters(outcomes=() if set(outcomes) == set(OUTCOME_LOV) else outcomes)
 
 
 def on_filter(state, var_name=None, value=None):
     f = filters_of(state)
-    if var_name in ("team_name", "selected_outcomes"):
-        state.cards = card_labels(DATA, Filters(team_of(state.team_name)))
+    if var_name == "selected_outcomes":
+        state.cards = card_labels(DATA, f)
         state.selected_card = state.cards[0] if state.cards else ""
-        entity = entity_of(state.selected_card) if state.selected_card else None
-    else:
-        entity = entity_of(state.selected_card) if state.selected_card else None
+    entity = entity_of(state.selected_card) if state.selected_card else None
     values = compute(DATA, f, entity)
     values["outcome_summary"] = summary_of(state.selected_outcomes)
     with state:
@@ -71,9 +60,8 @@ def summary_of(chosen) -> str:
 
 def on_reset(state, *_):
     with state:
-        state.team_name = "Все команды"
         state.selected_outcomes = list(OUTCOME_LOV)
-        state.cards = card_labels(DATA, Filters(None))
+        state.cards = card_labels(DATA, Filters())
         state.selected_card = state.cards[0]
     on_filter(state)
 
@@ -91,10 +79,11 @@ def kpi_markup() -> str:
 
 
 def card(question: str, hint: str, figure: str, height: int) -> str:
+    hint_markup = f"<|{hint}|text|class_name=card-hint|>\n" if hint else ""
     return (
         "<|part|class_name=card|\n"
         f"<|{question}|text|class_name=card-title|>\n"
-        f"<|{hint}|text|class_name=card-hint|>\n"
+        f"{hint_markup}"
         f"<|chart|figure={{{figure}}}|plot_config={{PLOT_CONFIG}}|height={height}px|>\n"
         "|>"
     )
@@ -107,12 +96,10 @@ page = f"""
 <|{{caption}}|text|class_name=caption|>
 |>
 
-<|layout|columns=220px 240px 1fr 1fr|gap=12px|class_name=filters|
-<|{{team_name}}|selector|lov={{TEAM_LOV}}|dropdown|label=Команда|on_change=on_filter|>
-
+<|layout|columns=280px 1fr 180px|gap=12px|class_name=filters|
 <|{{selected_outcomes}}|selector|lov={{OUTCOME_LOV}}|dropdown|multiple|label=Исходы|selection_message={{outcome_summary}}|on_change=on_filter|>
 
-<|{{cards}}|selector|lov={{cards}}|dropdown|label=Карточка (водопад)|on_change=on_filter|>
+<|{{selected_card}}|selector|lov={{cards}}|dropdown|label=Карточка (водопад)|on_change=on_filter|>
 
 <|Сбросить фильтры|button|on_action=on_reset|class_name=reset|>
 |>
@@ -121,20 +108,18 @@ page = f"""
 
 <|layout|columns=1 1|gap=16px|class_name=row|
 {card("1. Почему модель решила так по этой карточке?",
-      "Водопад: от базовой линии через крупнейшие вклады к оценке модели; вправо — «к инциденту», влево — «к легитимному»",
-      "fig_card", 360)}
-{card("2. На чём модель держится на всём потоке?",
-      "Средний модуль вклада по карточкам выбранных фильтров; чем праве признак, тем сильнее модель на него опирается",
-      "fig_flow", 360)}
+      "Вклады складываются в логарифмах шансов: вправо — к инциденту, влево — к легитимному",
+      "fig_card", 430)}
+{card("2. Какие признаки дают наибольшие вклады в нашей группе?",
+      "Средний модуль SHAP по карточкам выбранных фильтров (не по всему потоку SOC)",
+      "fig_flow", 430)}
 |>
 
 <|layout|columns=1 1|gap=16px|class_name=row|
 {card("3. Куда толкает признак у инцидентов, а куда у ложных тревог?",
-      "Средний подписанный вклад топ-признаков по исходам: один и тот же признак может работать в обе стороны",
+      "Положительный SHAP — к инциденту, отрицательный — к легитимному; средние по исходам",
       "fig_outcomes", 360)}
-{card("4. Где объяснение выглядит сомнительно?",
-      "Оценка модели против вклада «Алерт» — признака обогащения, которое деградировало с сентября; пунктир — порог 0,0193",
-      "fig_alert", 360)}
+{card("4. Почему модель подняла ложную тревогу?", "{doubt_caption}", "fig_alert", 360)}
 |>
 |>
 """
