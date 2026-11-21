@@ -1,8 +1,6 @@
-"""Дашборд Taipy «Почему модель решила так» — задание 3 (SHAP).
+"""Дашборд SHAP-объяснений для команды № 4.
 
-Запуск из корня репозитория:
-    .venv/bin/python task_3/app.py   (или poetry run python task_3/app.py)
-и откройте http://127.0.0.1:5014
+Запуск: poetry run python task_3/app.py
 """
 
 from __future__ import annotations
@@ -18,8 +16,8 @@ from loader import OUTCOMES, PROJECT_TEAM, Filters
 from views import TILES, card_labels, compute, entity_of
 
 parser = argparse.ArgumentParser(description="Дашборд «Почему модель решила так» (задание 3, SHAP)")
-parser.add_argument("--cards", type=Path, default=None, help="cards_practice.csv из course_pack")
-parser.add_argument("--shap", type=Path, default=None, help="shap_cards.csv из course_pack")
+parser.add_argument("--cards", type=Path, default=None, help="Путь к CSV с карточками")
+parser.add_argument("--shap", type=Path, default=None, help="Путь к CSV с SHAP-вкладами")
 parser.add_argument("--port", type=int, default=5014)
 args, _ = parser.parse_known_args()
 

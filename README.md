@@ -1,3 +1,7 @@
+# Анализ данных и визуализация
+
+В репозитории находятся три задания курса: анализ карточек SOC, исследование решений модели и SHAP-объяснения.
+
 ## Подготовка проекта к работе
 
 Для работы необходимы Python 3.12, Poetry и Git.
@@ -25,9 +29,9 @@ poetry install
 
 **3. Загрузка данных**
 
-Скачать файлы из [общей папки на Яндекс Диске](https://disk.yandex.ru/d/waiZmiOzun8EZA) и положить в папку `data/` в корне проекта. Если папка отсутствует — создать её.
+Для заданий 1 и 2 скачайте файлы из [общей папки на Яндекс Диске](https://disk.yandex.ru/d/waiZmiOzun8EZA) и поместите в `data/`. Для задания 3 данные уже включены в репозиторий.
 
-Файлы из `data/` не отслеживаются Git и в репозиторий не загружаются.
+Исходные Parquet-файлы для заданий 1 и 2 хранятся локально. Два CSV для задания 3 уже включены в репозиторий в папке `data/task3/`.
 
 | Файл | Папка на Диске | Нужен для |
 |---|---|---|
@@ -45,10 +49,13 @@ poetry install
 |---|---|
 | `poetry run python task_1/app.py` | дашборд задания 1 → http://127.0.0.1:5011 |
 | `poetry run python task_2/app.py` | дашборд задания 2 → http://127.0.0.1:5013 |
+| `poetry run python task_3/app.py` | дашборд задания 3 → http://127.0.0.1:5014 |
 | `poetry run python -m unittest discover -s task_1` | проверки расчётов задания 1 (данные не нужны) |
 | `poetry run python -m unittest discover -s task_2` | проверки расчётов задания 2 (данные не нужны) |
+| `poetry run python -m unittest discover -s task_3` | проверки расчётов задания 3 |
 | `poetry run python task_1/report.py` | пересобрать `task_1/REPORT.md` по текущим данным |
 | `poetry run python task_2/report.py` | пересобрать `task_2/REPORT.md` по текущим данным |
+| `poetry run python task_3/report.py` | сформировать `task_3/REPORT.md` по восьми карточкам команды № 4 |
 
 Ноутбук `notebooks/01_eda.ipynb` запускается в Jupyter или VS Code с ядром окружения Poetry (`ipykernel` входит в dev-зависимости).
 
@@ -71,5 +78,7 @@ df = load_incidents("data/iavd_incidents_raw_target.parquet")
 | `src/` | общий загрузчик датасета (`data_loader.py`) |
 | `task_1/` | задание 1 «Карточки SOC»: дашборд Taipy, тесты, `README.md` и `REPORT.md` |
 | `task_2/` | задание 2 «Инференс модели»: дашборд Taipy, тесты, `README.md` и `REPORT.md` |
+| `task_3/` | задание 3 «SHAP-объяснение»: дашборд Taipy, тесты, `README.md` и `REPORT.md` |
+| `data/task3/` | CSV с учебными карточками и SHAP-вкладами для задания 3 |
 
-Результаты исследования данных и описание ограничений приведены в [отчёте](docs/data_report.md). Выводы дашбордов — в `task_1/REPORT.md` и `task_2/REPORT.md`: отчёты собираются `report.py` из тех же функций, что и плитки дашбордов, поэтому числа совпадают.
+Результаты исследования данных и описание ограничений приведены в [отчёте](docs/data_report.md). Выводы дашбордов — в `task_1/REPORT.md`, `task_2/REPORT.md` и `task_3/REPORT.md`: отчёты собираются `report.py` из тех же функций, что и плитки дашбордов, поэтому числа совпадают.
