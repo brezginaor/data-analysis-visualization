@@ -23,11 +23,12 @@ SHAP_FILE = DATA_DIR / "shap_cards.csv"
 PROJECT_TEAM = 4
 
 THRESHOLD = 0.0193  # рабочая порог модели, часть модели — не менять (см. model_card)
-SERVICE = ("EntityId", "y_true", "proba", "outcome", "base")
+SERVICE = ("EntityId", "y_true", "proba", "outcome", "base", "raw_score")
 OUTCOMES = ("TP", "FP", "FN", "TN")
 
-# Признаки обогащения карточки: с сентября 2025 оно деградирует (model_card),
-# поэтому вклады этих полей — главный кандидат на «сомнительное» объяснение.
+# Выбранные признаки для анализа чувствительности SHAP-объяснения.
+# Вычитание их вкладов не равнозначно повторному запуску модели без этих признаков.
+# По данной выборке нельзя установить ухудшение качества обогащения во времени.
 ENRICHMENT = ("Алерт", "Вендор из сием", "len_Значение Инцидента (группировка)")
 
 OUTCOME_LABELS = {
@@ -40,6 +41,8 @@ OUTCOME_LABELS = {
 # proba в shap_cards.csv округлена до 6 знаков, поэтому reconstruction проверяем
 # с допуском в полшага последнего разряда.
 RECONSTRUCTION_TOLERANCE = 6e-7
+# Допуск лекции 3.4 для независимой проверки в пространстве логарифма шансов.
+ADDITIVITY_TOLERANCE = 1e-6
 
 
 @dataclass(frozen=True)
@@ -50,6 +53,7 @@ class Data:
     base: float
     check: float  # максимальное расхождение sigmoid(base + ΣSHAP) с proba из файла
     path: Path
+    raw_check: float | None = None  # расхождение с независимым raw_score; None, если его нет
 
 
 @dataclass(frozen=True)
@@ -122,6 +126,21 @@ def reconstruction_check(shap: pd.DataFrame, features: tuple[str, ...], base: fl
     return float((1 / (1 + np.exp(-total)) - shap["proba"]).abs().max())
 
 
+def raw_score_additivity_check(shap: pd.DataFrame, features: tuple[str, ...], base: float) -> float | None:
+    """Сверка base + ΣSHAP с исходным raw_score, если он есть в данных.
+
+    logit(proba) не подменяет raw_score: вероятность записана с округлением,
+    поэтому восстановленный из неё логарифм шансов не годится для допуска 1e-6.
+    """
+    if "raw_score" not in shap.columns:
+        return None
+    raw_score = pd.to_numeric(shap["raw_score"], errors="coerce")
+    if not np.isfinite(raw_score.to_numpy(dtype=float)).all():
+        raise ValueError("Поле raw_score содержит пропуски или некорректные значения.")
+    total = base + shap[list(features)].sum(axis=1)
+    return float((total - raw_score).abs().max())
+
+
 def resolve_data_files(cards_path: Path | None = None, shap_path: Path | None = None) -> tuple[Path, Path]:
     """Возвращает два CSV из data/task3 (или из явно переданных путей)."""
     cards = Path(cards_path) if cards_path is not None else CARDS_FILE
@@ -142,7 +161,11 @@ def load(cards_path: Path | None = None, shap_path: Path | None = None,
     shap_raw, base = _read_shap(shap_path, tuple())  # список признаков определим по файлу
     features = tuple(c for c in shap_raw.columns if c not in SERVICE)
     shap, base = _read_shap(shap_path, features)
-    merged = shap.merge(cards[["EntityId", "team", "created", "flag"]], on="EntityId", how="inner", validate="one_to_one")
+    card_fields = ["EntityId", "team", "created", "flag"]
+    # raw_score может находиться в любом из двух CSV. Вклады в shap_cards.csv.
+    if "raw_score" in cards.columns and "raw_score" not in shap.columns:
+        card_fields.append("raw_score")
+    merged = shap.merge(cards[card_fields], on="EntityId", how="inner", validate="one_to_one")
     if len(merged) != len(cards):
         raise ValueError("Наборы карточек в cards_practice и shap_cards не совпадают.")
 
@@ -154,7 +177,14 @@ def load(cards_path: Path | None = None, shap_path: Path | None = None,
     check = reconstruction_check(merged, features, base)
     if check > RECONSTRUCTION_TOLERANCE:
         raise ValueError(f"Вклады не сходятся с оценкой модели: расхождение {check:.2e} > {RECONSTRUCTION_TOLERANCE:.0e}.")
-    return Data(cards=cards, shap=merged, features=features, base=base, check=check, path=shap_path)
+    raw_check = raw_score_additivity_check(merged, features, base)
+    if raw_check is not None and raw_check > ADDITIVITY_TOLERANCE:
+        raise ValueError(
+            f"Аддитивность SHAP нарушена: |base + ΣSHAP − raw_score| = "
+            f"{raw_check:.2e} > {ADDITIVITY_TOLERANCE:.0e}."
+        )
+    return Data(cards=cards, shap=merged, features=features, base=base,
+                check=check, path=shap_path, raw_check=raw_check)
 
 
 def apply_filters(shap: pd.DataFrame, f: Filters) -> pd.DataFrame:

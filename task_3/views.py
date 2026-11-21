@@ -9,15 +9,16 @@ import numpy as np
 
 import charts
 import metrics
-from loader import ENRICHMENT, OUTCOME_LABELS, PROJECT_TEAM, THRESHOLD, Data, Filters, apply_filters, ru_int, ru_pct, ru_proba
+from loader import (ENRICHMENT, OUTCOME_LABELS, PROJECT_TEAM, THRESHOLD,
+                    RECONSTRUCTION_TOLERANCE, Data, Filters, apply_filters, ru_int, ru_pct, ru_proba)
 
 DASH = "—"
 
 TILES = {
     "t_card": "Выбранная карточка",
     "t_check": "Объяснение сходится с оценкой",
-    "t_core": "Главная опора потока",
-    "t_doubt": "Сомнительные поднятия",
+    "t_core": "Главная опора группы",
+    "t_doubt": "Условное снижение ниже порога",
 }
 
 
@@ -58,9 +59,11 @@ def compute(data: Data, f: Filters, entity_id: int | None = None) -> dict:
 
     # Уровень 1½: проверяемость — вклады сходятся с оценкой модели.
     worst = max(data.check, 0.0)
-    out.update(tile("t_check", "да" if worst <= 5e-7 else f"±{worst:.1e}",
-                    f"sigmoid(база + 73 вклада) воспроизводит оценку с точностью {worst:.0e}"
-                    if worst <= 5e-7 else "вклады расходятся с оценкой модели", alert=worst > 5e-7))
+    note = (f"Сверено с raw_score (Δ ≤ {data.raw_check:.1e}) и proba"
+            if data.raw_check is not None else
+            "Сверено с округлённой proba; raw_score отсутствует")
+    out.update(tile("t_check", "да" if worst <= RECONSTRUCTION_TOLERANCE else f"±{worst:.1e}",
+                    note, alert=worst > RECONSTRUCTION_TOLERANCE))
 
     # Уровень 2: поток — на чём модель держится.
     top = metrics.mean_abs(flow, data.features)
@@ -78,14 +81,26 @@ def compute(data: Data, f: Filters, entity_id: int | None = None) -> dict:
     # Уровень 2: куда толкает признак у разных исходов.
     out["fig_outcomes"] = charts.signed_outcomes(metrics.signed_by_outcome(flow, data.features))
 
-    # Уровень 3: сомнительные объяснения — решение на деградировавшем обогащении.
+    # Уровень 3: проверяем чувствительность объяснения к выбранным SHAP-вкладам.
     doubt = metrics.enrichment_doubt(flow, data.features)
-    out["fig_alert"] = charts.alert_scatter(flow)
+    doubtful = metrics.doubtful_case(flow, data.features)
+    out["doubt_caption"] = (
+        f"Пример FP: карточка № {int(doubtful['EntityId'])}. "
+        "Выбор карточки для водопада на этот график не влияет."
+        if doubtful is not None else "В выбранных исходах нет подходящей FP-карточки."
+    )
+    out["fig_alert"] = (
+        charts.doubt_comparison(
+            float(doubtful["proba"]),
+            metrics.conditional_without_enrichment(doubtful, data.features),
+            int(doubtful["EntityId"]),
+        ) if doubtful is not None else charts.empty("Нет подходящих ложных тревог")
+    )
     if doubt["raised"]:
         alert = doubt["share"] >= 0.3
-        note = (f"{ru_int(doubt['on_enrichment'])} из {ru_int(doubt['raised'])} поднятых карточек держатся "
-                f"на обогащении; у порога — {ru_int(doubt['fp_near'])} ложных тревог из "
-                f"{ru_int(doubt['fp_near_total'])}")
+        note = (f"у {ru_int(doubt['on_enrichment'])} из {ru_int(doubt['raised'])} поднятых "
+                "условная оценка ниже порога; среди FP с оценкой ниже 10% — "
+                f"{ru_int(doubt['fp_near'])} из {ru_int(doubt['fp_near_total'])}")
         out.update(tile("t_doubt", ru_pct(doubt["share"], 0) if np.isfinite(doubt["share"]) else DASH,
                         note, alert=alert))
     else:

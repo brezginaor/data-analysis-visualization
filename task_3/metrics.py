@@ -14,7 +14,7 @@ from loader import ENRICHMENT, OUTCOMES, Filters, THRESHOLD, apply_filters
 
 TOP_FEATURES = 10       # сколько признаков показываем на уровне потока
 TOP_CONTRIBS = 8        # сколько вкладов в водопаде карточки
-NEAR_THRESHOLD = 0.1    # «у порога»: оценки до 0,1, где решение модели ещё можно переспорить
+LOW_FP_SCORE_LIMIT = 0.1  # фильтр FP с исходной оценкой ниже 10%, не порог модели
 
 
 def card_row(shap: pd.DataFrame, entity_id: int) -> pd.Series | None:
@@ -72,10 +72,10 @@ def signed_by_outcome(flow: pd.DataFrame, features: tuple[str, ...], k: int = 6)
 
 
 def enrichment_doubt(flow: pd.DataFrame, features: tuple[str, ...]) -> dict:
-    """Сомнительные объяснения: решение «к инциденту» держится на деградировавшем обогащении.
+    """Чувствительность объяснения к выбранным SHAP-вкладам обогащения.
 
-    Контрфактическая проверка: убираем вклады признаков обогащения и смотрим, упала бы
-    карточка ниже порога. Если да — без «сломанного» поля модель карточку бы не подняла.
+    Арифметически вычитаем эти вклады из суммы и проверяем, окажется ли
+    условная оценка ниже порога. Это не ablation и не прогноз модели без полей.
     """
     empty = {"raised": 0, "on_enrichment": 0, "share": np.nan, "fp_near": 0, "fp_near_total": 0}
     present = [f for f in ENRICHMENT if f in features]
@@ -88,18 +88,18 @@ def enrichment_doubt(flow: pd.DataFrame, features: tuple[str, ...]) -> dict:
     without = total - raised[present].sum(axis=1)
     kept_below = 1 / (1 + np.exp(-without.clip(-700, 700))) < THRESHOLD
     on_enrichment = int(kept_below.sum())
-    near = kept_below & raised["outcome"].eq("FP") & raised["proba"].lt(NEAR_THRESHOLD)
+    low_fp = raised["outcome"].eq("FP") & raised["proba"].lt(LOW_FP_SCORE_LIMIT)
     return {
         "raised": len(raised),
         "on_enrichment": on_enrichment,
         "share": on_enrichment / len(raised),
-        "fp_near": int(near.sum()),
-        "fp_near_total": int(raised["outcome"].eq("FP").sum()),
+        "fp_near": int((kept_below & low_fp).sum()),
+        "fp_near_total": int(low_fp.sum()),
     }
 
 
 def confirmed_case(flow: pd.DataFrame, features: tuple[str, ...]) -> pd.Series | None:
-    """Кандидат в «подтверждённые»: TP, который модель подняла бы и без обогащения."""
+    """Пример TP: условная оценка без выбранных SHAP-вкладов остаётся выше порога."""
     present = [f for f in ENRICHMENT if f in features]
     tps = flow.loc[flow["outcome"] == "TP"]
     if tps.empty or "base" not in tps.columns:
@@ -113,18 +113,29 @@ def confirmed_case(flow: pd.DataFrame, features: tuple[str, ...]) -> pd.Series |
     return robust.loc[push.idxmax()]
 
 
+def conditional_without_enrichment(row: pd.Series, features: tuple[str, ...]) -> float:
+    """Условная оценка: из суммы SHAP вычтены выбранные вклады обогащения.
+
+    Это арифметический сценарий для объяснения, не новый прогон модели без полей.
+    """
+    used = [f for f in features if f not in ENRICHMENT]
+    raw = float(row["base"]) + sum(float(row[f]) for f in used)
+    return float(1 / (1 + np.exp(-np.clip(raw, -700, 700))))
+
+
 def doubtful_case(flow: pd.DataFrame, features: tuple[str, ...]) -> pd.Series | None:
-    """Кандидат в «сомнительные»: FP, который падает ниже порога без вклада обогащения."""
+    """Пример FP с исходной оценкой ниже 10% и условной оценкой ниже порога."""
     present = [f for f in ENRICHMENT if f in features]
     if not present or flow.empty or "base" not in flow.columns:
         return None
-    near = flow.loc[flow["outcome"].eq("FP") & flow["proba"].between(THRESHOLD, NEAR_THRESHOLD, inclusive="left")]
-    if near.empty:
+    low_fp = flow.loc[flow["outcome"].eq("FP") &
+                      flow["proba"].between(THRESHOLD, LOW_FP_SCORE_LIMIT, inclusive="left")]
+    if low_fp.empty:
         return None
-    total = near["base"] + near[list(features)].sum(axis=1)
-    without = total - near[present].sum(axis=1)
+    total = low_fp["base"] + low_fp[list(features)].sum(axis=1)
+    without = total - low_fp[present].sum(axis=1)
     falls = 1 / (1 + np.exp(-without.clip(-700, 700))) < THRESHOLD
-    candidates = near.loc[falls]
+    candidates = low_fp.loc[falls]
     return None if candidates.empty else candidates.sort_values("proba").iloc[-1]
 
 
